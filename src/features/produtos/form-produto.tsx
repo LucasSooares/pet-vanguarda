@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { ImagePlus } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { ImagePlus, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -15,6 +16,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/estados"
 import { mensagemErro } from "@/lib/erros"
+import { getSupabase } from "@/lib/supabase/client"
 import type { Produto } from "@/lib/database.types"
 import { enviarImagem, useCategorias, useSalvarProduto } from "./api"
 
@@ -32,8 +34,17 @@ const schema = z.object({
     .regex(/^[A-Za-z0-9._-]*$/, "Use letras, números, ponto, hífen ou _")
     .optional(),
   categoria_id: z.string().optional(),
-  estoque_minimo: z.coerce.number<number>().int("Número inteiro").min(0).max(100000),
-  estoque_inicial: z.coerce.number<number>().int("Número inteiro").min(0).max(100000).optional(),
+  estoque_minimo: z.coerce
+    .number<number>({ message: "Informe a quantidade" })
+    .int("Use um número inteiro (sem vírgula)")
+    .min(0, "Não pode ser negativo")
+    .max(100000),
+  estoque_inicial: z.coerce
+    .number<number>({ message: "Informe a quantidade" })
+    .int("Use um número inteiro (sem vírgula)")
+    .min(0, "Não pode ser negativo")
+    .max(100000)
+    .optional(),
   ativo: z.boolean(),
 })
 type Dados = z.infer<typeof schema>
@@ -52,7 +63,28 @@ export function FormProduto({
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+  const [novaCategoria, setNovaCategoria] = useState("")
+  const [criandoCategoria, setCriandoCategoria] = useState(false)
+  const qc = useQueryClient()
   const { register, handleSubmit, reset, setValue, watch, formState } = useForm<Dados>({ resolver: zodResolver(schema) })
+
+  async function criarCategoria() {
+    const nome = novaCategoria.trim()
+    if (nome.length < 2) return toast.error("Nome da categoria: mínimo 2 caracteres")
+    setCriandoCategoria(true)
+    try {
+      const { data, error } = await getSupabase().from("categorias").insert({ nome }).select("id").single()
+      if (error) throw error
+      await qc.invalidateQueries({ queryKey: ["categorias"] })
+      setValue("categoria_id", data.id)
+      setNovaCategoria("")
+      toast.success("Categoria criada")
+    } catch (e) {
+      toast.error(mensagemErro(e))
+    } finally {
+      setCriandoCategoria(false)
+    }
+  }
 
   useEffect(() => {
     if (!aberto) return
@@ -63,7 +95,7 @@ export function FormProduto({
       sku: produto?.sku ?? "",
       categoria_id: produto?.categoria_id ?? SEM,
       estoque_minimo: produto?.estoque_minimo ?? 0,
-      estoque_inicial: 0,
+      estoque_inicial: produto?.estoque_atual ?? 0,
       ativo: produto?.ativo ?? true,
     })
     setArquivo(null)
@@ -71,9 +103,11 @@ export function FormProduto({
   }, [aberto, produto, reset])
 
   const enviar = handleSubmit(async (d) => {
+    let etapa: "imagem" | "salvar" | "ajuste" = "imagem"
     try {
       setEnviando(true)
       const imagem_url = arquivo ? await enviarImagem(arquivo) : (produto?.imagem_url ?? null)
+      etapa = "salvar"
       await salvar.mutateAsync({
         id: produto?.id,
         dados: {
@@ -88,9 +122,23 @@ export function FormProduto({
           estoque_inicial: produto ? undefined : d.estoque_inicial,
         },
       })
+      // Saldo alterado na edição vira um "ajuste" (fica no histórico e na auditoria)
+      if (produto && d.estoque_inicial != null && d.estoque_inicial !== produto.estoque_atual) {
+        etapa = "ajuste"
+        const { error } = await getSupabase().from("movimentacoes_estoque").insert({
+          produto_id: produto.id,
+          tipo: "ajuste",
+          quantidade: d.estoque_inicial,
+          motivo: "Ajuste pelo cadastro do produto",
+        })
+        if (error) throw error
+        qc.invalidateQueries({ queryKey: ["produtos"] })
+        qc.invalidateQueries({ queryKey: ["movimentacoes"] })
+      }
       onFechar()
     } catch (e) {
-      if (arquivo) toast.error(mensagemErro(e))
+      // Erros do salvar já viram toast no hook; aqui ficam os do upload e do ajuste
+      if (etapa !== "salvar") toast.error(mensagemErro(e))
     } finally {
       setEnviando(false)
     }
@@ -151,9 +199,8 @@ export function FormProduto({
               {erro("preco")}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="sku">SKU</Label>
-              <Input id="sku" {...register("sku")} />
-              {erro("sku")}
+              <Label htmlFor="sku">Código do produto (opcional)</Label>
+              <Input id="sku" placeholder="Ex.: RAC-PREMIER-20KG" {...register("sku")} />              {erro("sku")}
             </div>
           </div>
           <div className="space-y-2">
@@ -171,26 +218,41 @@ export function FormProduto({
                 ))}
               </SelectContent>
             </Select>
+            {categorias.data?.length === 0 && (
+              <p className="text-muted-foreground text-xs">Nenhuma categoria cadastrada ainda. Crie uma abaixo.</p>
+            )}
+            <div className="flex gap-2">
+              <Input
+                aria-label="Nova categoria"
+                placeholder="Nova categoria (ex.: Rações)"
+                value={novaCategoria}
+                onChange={(e) => setNovaCategoria(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    criarCategoria()
+                  }
+                }}
+              />
+              <Button type="button" variant="outline" onClick={criarCategoria} disabled={criandoCategoria}>
+                {criandoCategoria ? <Spinner /> : <Plus />} Criar
+              </Button>
+            </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="estoque_minimo">Estoque mínimo</Label>
-              <Input id="estoque_minimo" type="number" min="0" {...register("estoque_minimo")} />
+              <Label htmlFor="estoque_inicial">{produto ? "Quantidade em estoque" : "Quantidade inicial em estoque"}</Label>
+              <Input id="estoque_inicial" type="number" min="0" step="1" inputMode="numeric" {...register("estoque_inicial")} />
+              <p className="text-muted-foreground text-xs">Quantas unidades você tem agora.</p>
+              {erro("estoque_inicial")}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="estoque_minimo">Avisar quando chegar a</Label>
+              <Input id="estoque_minimo" type="number" min="0" step="1" inputMode="numeric" {...register("estoque_minimo")} />
+              <p className="text-muted-foreground text-xs">Estoque mínimo: abaixo disso aparece alerta.</p>
               {erro("estoque_minimo")}
             </div>
-            {!produto && (
-              <div className="space-y-2">
-                <Label htmlFor="estoque_inicial">Estoque inicial</Label>
-                <Input id="estoque_inicial" type="number" min="0" {...register("estoque_inicial")} />
-                {erro("estoque_inicial")}
-              </div>
-            )}
           </div>
-          {produto && (
-            <p className="text-muted-foreground text-xs">
-              Saldo atual: <strong>{produto.estoque_atual}</strong>. Para alterar, use a tela de Estoque (entrada, saída ou ajuste).
-            </p>
-          )}
           <div className="flex items-center gap-3">
             <Switch id="ativo" checked={watch("ativo")} onCheckedChange={(v) => setValue("ativo", v)} />
             <Label htmlFor="ativo">Ativo (visível no app)</Label>
