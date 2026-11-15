@@ -105,6 +105,32 @@ export function useSalvarCategoria() {
   })
 }
 
+/**
+ * Exclui o produto (e o histórico de estoque dele). Produtos que já entraram em pedidos não são
+ * excluídos — o histórico de vendas depende deles; nesse caso a orientação é desativar.
+ */
+export function useExcluirProduto() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const supabase = getSupabase()
+      const { count, error: e1 } = await supabase
+        .from("pedido_itens")
+        .select("id", { count: "exact", head: true })
+        .eq("produto_id", id)
+      if (e1) throw e1
+      if (count) throw new Error("Este produto já aparece em pedidos e não pode ser excluído. Desative-o para sumir do app.")
+      const { error } = await supabase.from("produtos").delete().eq("id", id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Produto excluído")
+      invalidarProdutos(qc)
+    },
+    onError: (e) => toast.error(mensagemErro(e)),
+  })
+}
+
 /** Exclui a categoria; os produtos dela ficam "Sem categoria" (FK on delete set null). */
 export function useExcluirCategoria() {
   const qc = useQueryClient()

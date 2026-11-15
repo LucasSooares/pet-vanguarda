@@ -1,14 +1,15 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Package, Pencil, Plus, Search, X } from "lucide-react"
+import { Package, Pencil, Plus, Search, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { EstadoQuery, PageHeader, Vazio } from "@/components/estados"
-import { useAlternarProduto, useCategorias, useProdutos } from "@/features/produtos/api"
+import { useAlternarProduto, useCategorias, useExcluirProduto, useProdutos } from "@/features/produtos/api"
+import { Confirmar } from "@/components/confirmar"
 import { GerenciarCategorias } from "@/features/produtos/categorias"
 import { FormProduto } from "@/features/produtos/form-produto"
 import { ImportarCsv } from "@/features/produtos/importar-csv"
@@ -22,6 +23,7 @@ export default function ProdutosPage() {
   const produtos = useProdutos()
   const categorias = useCategorias()
   const alternar = useAlternarProduto()
+  const excluir = useExcluirProduto()
   const [busca, setBusca] = useState("")
   const [categoria, setCategoria] = useState(TODAS)
   const [editando, setEditando] = useState<Produto | null>(null)
@@ -116,7 +118,7 @@ export default function ProdutosPage() {
                   <TableHead className="text-right">Preço</TableHead>
                   <TableHead className="text-right">Estoque</TableHead>
                   <TableHead>Ativo</TableHead>
-                  <TableHead className="w-12">
+                  <TableHead className="w-24">
                     <span className="sr-only">Ações</span>
                   </TableHead>
                 </TableRow>
@@ -136,7 +138,7 @@ export default function ProdutosPage() {
                         )}
                         <div>
                           <p className="font-medium">{p.nome}</p>
-                          <p className="text-muted-foreground text-xs">{p.sku ?? "sem SKU"}</p>
+                          <p className="text-muted-foreground text-xs">{p.sku ?? ""}</p>
                         </div>
                       </div>
                     </TableCell>
@@ -153,9 +155,22 @@ export default function ProdutosPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Button size="icon" variant="ghost" aria-label={`Editar ${p.nome}`} onClick={() => abrir(p)}>
-                        <Pencil className="size-4" />
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button size="icon" variant="ghost" aria-label={`Editar ${p.nome}`} onClick={() => abrir(p)}>
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Confirmar
+                          gatilho={
+                            <Button size="icon" variant="ghost" aria-label={`Excluir ${p.nome}`} className="text-destructive">
+                              <Trash2 className="size-4" />
+                            </Button>
+                          }
+                          titulo={`Excluir “${p.nome}”?`}
+                          descricao="O produto e o histórico de estoque dele serão apagados. Não dá para desfazer. Se ele já foi vendido, a exclusão é bloqueada — desative-o em vez disso."
+                          textoConfirmar="Excluir"
+                          onConfirmar={() => excluir.mutateAsync(p.id)}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
