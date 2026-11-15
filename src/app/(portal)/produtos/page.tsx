@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Package, Pencil, Plus, Search } from "lucide-react"
+import { Package, Pencil, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -61,7 +61,7 @@ export default function ProdutosPage() {
       <div className="bg-card shadow-soft mb-4 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row">
         <div className="relative flex-1">
           <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" aria-hidden />
-          <Input aria-label="Buscar produto" placeholder="Nome ou SKU…" className="pl-9" value={busca} onChange={(e) => setBusca(e.target.value)} />
+          <Input aria-label="Buscar produto" placeholder="Nome ou código…" className="pl-9" value={busca} onChange={(e) => setBusca(e.target.value)} />
         </div>
         <Select value={categoria} onValueChange={setCategoria}>
           <SelectTrigger className="sm:w-56" aria-label="Filtrar por categoria">
@@ -76,6 +76,17 @@ export default function ProdutosPage() {
             ))}
           </SelectContent>
         </Select>
+        {(busca || categoria !== TODAS) && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setBusca("")
+              setCategoria(TODAS)
+            }}
+          >
+            <X /> Limpar filtros
+          </Button>
+        )}
       </div>
 
       <div className="bg-card shadow-soft overflow-hidden rounded-2xl border">

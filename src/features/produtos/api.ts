@@ -105,6 +105,23 @@ export function useSalvarCategoria() {
   })
 }
 
+/** Exclui a categoria; os produtos dela ficam "Sem categoria" (FK on delete set null). */
+export function useExcluirCategoria() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await getSupabase().from("categorias").delete().eq("id", id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Categoria excluída")
+      qc.invalidateQueries({ queryKey: ["categorias"] })
+      invalidarProdutos(qc)
+    },
+    onError: (e) => toast.error(mensagemErro(e)),
+  })
+}
+
 export function useMovimentacoes(produtoId: string | null) {
   return useQuery({
     queryKey: ["movimentacoes", produtoId],
